@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+  <title>IncluyeTech 🦻</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@stlite/browser/build/stlite.css" />
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    #root {
+      height: 100vh;
+      width: 100vw;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/plain" id="code-logica">
+"""
+logica.py — Lógica del prototipo "Sugerencia de apoyos de comunicación".
+
+Trabajo Final · Computación en la Sociedad · Tema: tecnologías emergentes de apoyo
+(IA y accesibilidad digital) para estudiantes con discapacidad auditiva en colegios
+públicos de EBR del Perú.
+
+Este módulo NO usa Streamlit: contiene solo constantes, listas (arreglos), funciones y
+estructuras de control, de modo que pueda probarse por separado (ver casos_prueba.py).
+
+Principios de diseño (tomados de la "Propuesta de respuesta responsable", informe):
+  1. El sistema SUGIERE; la decisión final es del docente y del especialista del SAE.
+  2. No diagnostica ni evalúa el rendimiento del estudiante (MINEDU, 2024, num. 5.2.1.5).
+  3. La modalidad comunicativa la declara el estudiante / su familia; el sistema no la infiere.
+  4. Un apoyo digital (subtítulos, voz a texto) NO reemplaza a la LSP ni al intérprete.
+  5. No se guardan datos personales ni audio: solo se procesan condiciones del colegio.
+  6. Los tipos de colegio A-D son una propuesta del equipo, no una clasificación oficial.
+"""
+
+from dataclasses import dataclass, field
+
+# ---------------------------------------------------------------------------
+# 1. CONSTANTES
+# ---------------------------------------------------------------------------
+
+# Frase que debe acompañar siempre al resultado (Propuesta, "Descripción de la solución").
+DECISION_FINAL = (
+    "Esta es una SUGERENCIA. La decisión final corresponde al docente y al "
+    "especialista del SAE, junto con el estudiante y su familia. El sistema no "
+    "diagnostica ni evalúa el rendimiento académico."
+)
+
+# --- Modalidad comunicativa DECLARADA por el estudiante / familia -----------------
+MOD_LSP = "LSP"
+MOD_ORAL = "ORAL_ESCRITA"
+MOD_MIXTA = "MIXTA"
+MOD_NO_DECLARADA = "NO_DECLARADA"
+
+MODALIDADES = {
+    MOD_LSP: "Usa principalmente Lengua de Señas Peruana (LSP)",
+    MOD_ORAL: "Usa lengua oral y lectura/escritura (necesita acceso visual al texto)",
+    MOD_MIXTA: "Usa LSP y también lengua oral/escrita",
+    MOD_NO_DECLARADA: "Aún no se ha consultado o no se ha declarado",
+}
+
+# --- Conectividad del local (valores autodeclarados por el docente o director) ---
+CONEXION_ESTABLE = "ESTABLE"
+CONEXION_LIMITADA = "LIMITADA"
+CONEXION_NINGUNA = "NINGUNA"
+
+CONEXIONES = {
+    CONEXION_ESTABLE: "Internet estable",
+    CONEXION_LIMITADA: "Internet limitado o inestable",
+    CONEXION_NINGUNA: "Sin Internet",
+}
+
+# --- Tipo de contenido que se necesita hacer accesible ----------------------------
+CONT_EN_VIVO = "EN_VIVO"
+CONT_GRABADO = "GRABADO"
+CONT_AMBOS = "AMBOS"
+
+CONTENIDOS = {
+    CONT_EN_VIVO: "Explicación oral del docente en clase (en vivo)",
+    CONT_GRABADO: "Videos o audios ya grabados",
+    CONT_AMBOS: "Ambos",
+}
+
+# --- Tipos de colegio (Tabla 4 del informe; clasificación propuesta por el equipo) ---
+TIPO_A, TIPO_B, TIPO_C, TIPO_D = "A", "B", "C", "D"
+
+TIPOS_COLEGIO = {
+    TIPO_A: "Tipo A: colegio con conexión estable",
+    TIPO_B: "Tipo B: colegio con conexión limitada o inestable",
+    TIPO_C: "Tipo C: colegio sin Internet, pero con electricidad",
+    TIPO_D: "Tipo D: colegio sin electricidad confiable (o sin dispositivo)",
+}
+
+RESPONSABLES_TIPO = {
+    TIPO_A: "Dirección del colegio, SAE interno y docentes",
+    TIPO_B: "Dirección del colegio, UGEL y equipo técnico",
+    TIPO_C: "Equipo técnico, docentes y SAE",
+    TIPO_D: "MINEDU, DRE, UGEL y dirección del colegio",
+}
+
+# --- Prioridades de una sugerencia -------------------------------------------------
+PRIORIDAD_PRINCIPAL = "Principal"
+PRIORIDAD_COMPLEMENTARIA = "Complementaria"
+PRIORIDAD_PROVISIONAL = "Provisional (consultar antes al estudiante y su familia)"
+
+# --- Catálogo de apoyos (arreglo de registros) ------------------------------------
+# Cada apoyo declara sus REQUISITOS; una función los contrasta con las condiciones
+# del colegio. Así la regla "no sugerir lo que el colegio no puede sostener" queda
+# expresada en datos y no repartida en muchos if.
+#   conexiones      : conexiones con las que el apoyo puede funcionar
+#   electricidad    : requiere electricidad confiable
+#   dispositivo     : requiere un dispositivo (del docente o del colegio)
+#   dispositivo_apto: requiere un dispositivo con capacidad para procesar localmente
+#   consentimiento  : requiere consentimiento escrito de la familia (envía voz a la nube)
+#   humano          : es un apoyo humano gestionado por la UGEL
+APOYOS = [
+    {
+        "id": "SUBTITULOS_NUBE",
+        "nombre": "Subtítulos en vivo en la nube (p. ej., Live Transcribe)",
+        "conexiones": [CONEXION_ESTABLE],
+        "electricidad": True, "dispositivo": True, "dispositivo_apto": False,
+        "consentimiento": True, "humano": False,
+        "nota": "Requiere Internet continuo. La voz viaja a servidores externos: "
+                "verificar el tratamiento de datos sensibles de menores.",
+    },
+    {
+        "id": "ASR_LOCAL",
+        "nombre": "Transcripción local sin conexión (p. ej., OpenAI Whisper)",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": True, "dispositivo": True, "dispositivo_apto": True,
+        "consentimiento": False, "humano": False,
+        "nota": "Procesa en el equipo del colegio sin enviar la voz a la nube. "
+                "Su rendimiento depende del dispositivo y de pruebas previas en el aula.",
+    },
+    {
+        "id": "TRANSCRIPCION_REVISADA",
+        "nombre": "Transcripciones revisadas por el docente",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": True, "dispositivo": True, "dispositivo_apto": False,
+        "consentimiento": False, "humano": False,
+        "nota": "El docente prepara o corrige el texto antes de compartirlo. "
+                "Es el apoyo escrito más confiable porque pasa por revisión humana.",
+    },
+    {
+        "id": "VIDEO_SUBTITULADO",
+        "nombre": "Videos con subtítulos descargados previamente",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": True, "dispositivo": True, "dispositivo_apto": False,
+        "consentimiento": False, "humano": False,
+        "nota": "Se descargan o preparan con anticipación, por lo que no dependen de "
+                "la conexión durante la clase. Verificar la licencia del material.",
+    },
+    {
+        "id": "MATERIAL_VISUAL_IMPRESO",
+        "nombre": "Materiales visuales impresos (guiones, resúmenes, esquemas)",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": False, "dispositivo": False, "dispositivo_apto": False,
+        "consentimiento": False, "humano": False,
+        "nota": "No depende de equipos electrónicos; sirve cuando no hay electricidad confiable.",
+    },
+    {
+        "id": "INTERPRETE_LSP",
+        "nombre": "Intérprete de LSP (presencial o virtual) gestionado por la UGEL",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": False, "dispositivo": False, "dispositivo_apto": False,
+        "consentimiento": False, "humano": True,
+        "nota": "Un mismo intérprete suele atender varias instituciones; se organiza por UGEL.",
+    },
+    {
+        "id": "MODELO_LINGUISTICO",
+        "nombre": "Modelo lingüístico sordo usuario de LSP",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": False, "dispositivo": False, "dispositivo_apto": False,
+        "consentimiento": False, "humano": True,
+        "nota": "Facilita el aprendizaje de la LSP y el acercamiento a la cultura sorda.",
+    },
+    {
+        "id": "GESTION_INFRAESTRUCTURA",
+        "nombre": "Gestión de mejoras de energía y equipos ante MINEDU, DRE y UGEL",
+        "conexiones": [CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA],
+        "electricidad": False, "dispositivo": False, "dispositivo_apto": False,
+        "consentimiento": False, "humano": True,
+        "nota": "Antes de incorporar herramientas de IA hay que resolver la infraestructura.",
+    },
+]
+
+# Apoyos que el sistema NO sugiere nunca, con su razón (lista constante).
+APOYOS_EXCLUIDOS_SIEMPRE = [
+    {
+        "nombre": "Avatares o traducción automática a LSP como reemplazo del intérprete",
+        "razon": "La WFD y la WASLI (2018) advierten contra sustituir intérpretes por avatares, "
+                 "y no se halló una herramienta validada para la LSP.",
+    },
+    {
+        "nombre": "Voz a texto como vía para que el estudiante sordo se exprese",
+        "razon": "El reconocimiento de voz falla mucho con voz sorda (≈78 % de error en un "
+                 "estudio pequeño; Glasser et al., 2017). Úsese solo para que el estudiante "
+                 "reciba lo que dice el docente.",
+    },
+]
+
+# Salvaguardas que acompañan SIEMPRE cualquier sugerencia (lista constante).
+SALVAGUARDAS = [
+    "Revisión humana: el docente revisa y corrige lo que produzca cualquier herramienta "
+    "antes de usarlo como única fuente de información importante.",
+    "No grabar ni almacenar audio de la clase; procesar en el dispositivo cuando sea posible.",
+    "Probar la herramienta en el aula real antes de adoptarla (precisión, tiempo de respuesta, ruido).",
+    "Verificar la licencia de los videos, textos e imágenes antes de subirlos a un servicio.",
+    "Consultar al estudiante y a su familia; la elección del apoyo debe ser de ellos, no impuesta.",
+    "Los subtítulos y la LSP atienden necesidades distintas: ninguno sustituye automáticamente al otro.",
+]
+
+# Pasos de verificación según las fases de implementación (Tabla 5 del informe).
+FASES = [
+    "1. Diagnóstico de necesidades",
+    "2. Selección de herramientas",
+    "3. Pruebas de funcionamiento",
+    "4. Implementación progresiva",
+    "5. Seguimiento y mejora continua",
+]
+
+
+# ---------------------------------------------------------------------------
+# 2. ESTRUCTURAS DE DATOS
+# ---------------------------------------------------------------------------
+
+@dataclass
+class Entrada:
+    """Datos que ingresa el docente o el SAE. No contiene datos personales."""
+    modalidad: str = MOD_NO_DECLARADA
+    conexion: str = CONEXION_NINGUNA
+    electricidad_confiable: bool = True
+    hay_dispositivo: bool = True
+    dispositivo_apto_local: bool = False
+    apoyo_humano_lsp_disponible: bool = False
+    consentimiento_familia: bool = False
+    aula_ruidosa: bool = False
+    contenido: str = CONT_EN_VIVO
+
+
+@dataclass
+class Sugerencia:
+    id_apoyo: str
+    nombre: str
+    prioridad: str
+    motivo: str
+    nota: str
+    regla: str
+
+
+@dataclass
+class Resultado:
+    tipo_colegio: str = ""
+    sugerencias: list = field(default_factory=list)
+    no_sugeridos: list = field(default_factory=list)   # (nombre, razón)
+    alertas: list = field(default_factory=list)
+    reglas_aplicadas: list = field(default_factory=list)
+    errores: list = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# 3. FUNCIONES
+# ---------------------------------------------------------------------------
+
+def validar_entrada(e: Entrada) -> list:
+    """Devuelve la lista de errores de validación (vacía si todo es válido)."""
+    errores = []
+    if e.modalidad not in MODALIDADES:
+        errores.append("Modalidad comunicativa no válida.")
+    if e.conexion not in CONEXIONES:
+        errores.append("Tipo de conexión no válido.")
+    if e.contenido not in CONTENIDOS:
+        errores.append("Tipo de contenido no válido.")
+    # Coherencia: no puede haber dispositivo apto si no hay dispositivo.
+    if e.dispositivo_apto_local and not e.hay_dispositivo:
+        errores.append("Se indicó dispositivo apto para procesamiento local, pero no hay dispositivo.")
+    return errores
+
+
+def clasificar_colegio(e: Entrada) -> str:
+    """Clasifica el colegio en A, B, C o D (Tabla 4 del informe).
+
+    Se evalúa en orden de restricción: primero energía/dispositivo, luego conectividad.
+    """
+    if (not e.electricidad_confiable) or (not e.hay_dispositivo):
+        return TIPO_D
+    if e.conexion == CONEXION_NINGUNA:
+        return TIPO_C
+    if e.conexion == CONEXION_LIMITADA:
+        return TIPO_B
+    return TIPO_A
+
+
+def buscar_apoyo(id_apoyo: str) -> dict:
+    """Busca un apoyo en el catálogo recorriendo la lista."""
+    for apoyo in APOYOS:
+        if apoyo["id"] == id_apoyo:
+            return apoyo
+    raise KeyError(f"Apoyo no registrado: {id_apoyo}")
+
+
+def evaluar_viabilidad(apoyo: dict, e: Entrada) -> tuple:
+    """Contrasta los requisitos de un apoyo con las condiciones del colegio.
+
+    Devuelve (es_viable, razón). Si no es viable, la razón explica por qué.
+    """
+    if e.conexion not in apoyo["conexiones"]:
+        return False, "requiere una conexión a Internet que el colegio no tiene en este momento"
+    if apoyo["electricidad"] and not e.electricidad_confiable:
+        return False, "requiere electricidad confiable"
+    if apoyo["dispositivo"] and not e.hay_dispositivo:
+        return False, "requiere un dispositivo (del docente o del colegio)"
+    if apoyo["dispositivo_apto"] and not e.dispositivo_apto_local:
+        return False, "requiere un dispositivo con capacidad para procesar localmente"
+    if apoyo["consentimiento"] and not e.consentimiento_familia:
+        return False, "requiere consentimiento escrito de la familia (la voz se envía a la nube)"
+    if apoyo["humano"] and apoyo["id"] in ("INTERPRETE_LSP", "MODELO_LINGUISTICO") \
+            and not e.apoyo_humano_lsp_disponible:
+        return False, "no hay apoyo humano de LSP disponible; debe gestionarse con la UGEL"
+    return True, ""
+
+
+def candidatos_por_tipo(tipo: str) -> list:
+    """Devuelve la lista de candidatos (id, prioridad base, motivo, regla) según el tipo de colegio."""
+    if tipo == TIPO_A:
+        return [
+            ("SUBTITULOS_NUBE", PRIORIDAD_PRINCIPAL,
+             "El colegio tiene Internet estable y dispositivos.", "R-A1"),
+            ("ASR_LOCAL", PRIORIDAD_COMPLEMENTARIA,
+             "Alternativa que no envía la voz a la nube.", "R-A2"),
+            ("VIDEO_SUBTITULADO", PRIORIDAD_COMPLEMENTARIA,
+             "Para materiales audiovisuales grabados.", "R-A3"),
+            ("TRANSCRIPCION_REVISADA", PRIORIDAD_COMPLEMENTARIA,
+             "Respaldo revisado por una persona.", "R-A4"),
+        ]
+    if tipo == TIPO_B:
+        return [
+            ("VIDEO_SUBTITULADO", PRIORIDAD_PRINCIPAL,
+             "La conexión es inestable: conviene preparar los materiales con anticipación.", "R-B1"),
+            ("TRANSCRIPCION_REVISADA", PRIORIDAD_PRINCIPAL,
+             "No depende de la conexión durante la clase.", "R-B2"),
+            ("ASR_LOCAL", PRIORIDAD_COMPLEMENTARIA,
+             "Funciona sin conexión si el equipo es compatible.", "R-B3"),
+        ]
+    if tipo == TIPO_C:
+        return [
+            ("ASR_LOCAL", PRIORIDAD_PRINCIPAL,
+             "No hay Internet, pero hay electricidad y dispositivo.", "R-C1"),
+            ("TRANSCRIPCION_REVISADA", PRIORIDAD_PRINCIPAL,
+             "Material revisado y preparado sin conexión.", "R-C2"),
+            ("VIDEO_SUBTITULADO", PRIORIDAD_COMPLEMENTARIA,
+             "Videos con subtítulos cargados con anticipación en el equipo.", "R-C3"),
+        ]
+    # Tipo D
+    return [
+        ("MATERIAL_VISUAL_IMPRESO", PRIORIDAD_PRINCIPAL,
+         "No hay electricidad confiable o dispositivo: priorizar materiales sin equipos.", "R-D1"),
+        ("GESTION_INFRAESTRUCTURA", PRIORIDAD_PRINCIPAL,
+         "Antes de usar herramientas de IA se deben evaluar mejoras de infraestructura.", "R-D2"),
+    ]
+
+
+def candidatos_por_modalidad(modalidad: str) -> list:
+    """Apoyos humanos que dependen de la modalidad declarada (LSP o mixta)."""
+    if modalidad in (MOD_LSP, MOD_MIXTA):
+        return [
+            ("INTERPRETE_LSP", PRIORIDAD_PRINCIPAL,
+             "El estudiante usa LSP: el apoyo humano en LSP es el principal.", "R-M1"),
+            ("MODELO_LINGUISTICO", PRIORIDAD_PRINCIPAL,
+             "Facilita el aprendizaje de la LSP y el acercamiento a la cultura sorda.", "R-M2"),
+        ]
+    return []
+
+
+def ajustar_prioridad_por_modalidad(prioridad: str, modalidad: str, es_humano: bool) -> str:
+    """Ajusta la prioridad de un apoyo digital según la modalidad declarada."""
+    if es_humano:
+        return prioridad
+    if modalidad == MOD_NO_DECLARADA:
+        return PRIORIDAD_PROVISIONAL
+    if modalidad == MOD_LSP and prioridad == PRIORIDAD_PRINCIPAL:
+        # Para quien usa LSP, el texto es un complemento y no un reemplazo.
+        return PRIORIDAD_COMPLEMENTARIA
+    return prioridad
+
+
+def construir_alertas(e: Entrada, tipo: str, sugerencias: list) -> list:
+    """Genera las alertas que el docente / SAE debe leer antes de decidir."""
+    alertas = []
+    ids = [s.id_apoyo for s in sugerencias]
+
+    if e.modalidad == MOD_NO_DECLARADA:
+        alertas.append("Perfil incompleto: todavía no se consultó la modalidad comunicativa del "
+                       "estudiante. Las sugerencias son provisionales; consulte primero al "
+                       "estudiante y a su familia.")
+
+    if e.modalidad in (MOD_LSP, MOD_MIXTA) and not e.apoyo_humano_lsp_disponible:
+        alertas.append("Brecha de apoyo humano: el estudiante usa LSP y no hay intérprete ni modelo "
+                       "lingüístico disponible. Gestione el apoyo con la UGEL; el texto automático "
+                       "no es un reemplazo.")
+
+    if e.modalidad == MOD_LSP:
+        alertas.append("Para quien usa LSP principalmente, los subtítulos son un complemento y "
+                       "no equivalen a la interpretación (WCAG 2.2: criterios 1.2.2/1.2.4 y 1.2.6 son distintos).")
+
+    usa_asr = any(i in ids for i in ("SUBTITULOS_NUBE", "ASR_LOCAL"))
+    if usa_asr and e.aula_ruidosa:
+        alertas.append("Aula ruidosa: la tasa de error de los reconocedores de voz sube mucho en aulas "
+                       "reales (Southwell et al., 2022). Use un micrófono cercano al docente y trate "
+                       "la transcripción como apoyo revisable, no como registro fiel.")
+
+    if "SUBTITULOS_NUBE" in ids:
+        alertas.append("Herramienta en la nube: confirme el consentimiento escrito de la familia y "
+                       "las condiciones del servicio (datos sensibles de menores).")
+
+    if "ASR_LOCAL" in ids and tipo in (TIPO_B, TIPO_C):
+        alertas.append("Procesamiento local: valide en el equipo real la velocidad y la precisión "
+                       "antes de usarlo en clase.")
+
+    if e.contenido in (CONT_EN_VIVO, CONT_AMBOS) and tipo == TIPO_D:
+        alertas.append("Contenido en vivo sin electricidad confiable: se requiere apoyo humano "
+                       "coordinado, porque no hay una solución digital viable por ahora.")
+
+    return alertas
+
+
+def sugerir_apoyos(e: Entrada) -> Resultado:
+    """Función principal: recibe las condiciones y devuelve las sugerencias.
+
+    Flujo (secuencial):
+      1) validar -> 2) clasificar colegio -> 3) reunir candidatos -> 4) filtrar por
+      viabilidad -> 5) ajustar prioridad por modalidad -> 6) alertas.
+    """
+    r = Resultado()
+
+    # 1) Validación
+    r.errores = validar_entrada(e)
+    if r.errores:
+        return r
+
+    # 2) Clasificación del colegio
+    r.tipo_colegio = clasificar_colegio(e)
+    r.reglas_aplicadas.append(f"Clasificación: {TIPOS_COLEGIO[r.tipo_colegio]}")
+
+    # 3) Candidatos (por tipo de colegio y por modalidad declarada)
+    candidatos = candidatos_por_modalidad(e.modalidad) + candidatos_por_tipo(r.tipo_colegio)
+
+    # 4) Filtrado por viabilidad + 5) ajuste de prioridad
+    vistos = []
+    for id_apoyo, prioridad, motivo, regla in candidatos:
+        if id_apoyo in vistos:
+            continue
+        vistos.append(id_apoyo)
+        apoyo = buscar_apoyo(id_apoyo)
+        viable, razon = evaluar_viabilidad(apoyo, e)
+        if not viable:
+            r.no_sugeridos.append((apoyo["nombre"], razon))
+            r.reglas_aplicadas.append(f"{regla}: descartado ({razon})")
+            continue
+        prioridad_final = ajustar_prioridad_por_modalidad(prioridad, e.modalidad, apoyo["humano"])
+        r.sugerencias.append(Sugerencia(id_apoyo, apoyo["nombre"], prioridad_final,
+                                        motivo, apoyo["nota"], regla))
+        r.reglas_aplicadas.append(f"{regla}: sugerido como «{prioridad_final}»")
+
+    # Ordenar: principal, complementaria, provisional
+    orden = {PRIORIDAD_PRINCIPAL: 0, PRIORIDAD_COMPLEMENTARIA: 1, PRIORIDAD_PROVISIONAL: 2}
+    r.sugerencias.sort(key=lambda s: orden.get(s.prioridad, 9))
+
+    # Apoyos excluidos siempre (constantes)
+    for excluido in APOYOS_EXCLUIDOS_SIEMPRE:
+        r.no_sugeridos.append((excluido["nombre"], excluido["razon"]))
+
+    # 6) Alertas
+    r.alertas = construir_alertas(e, r.tipo_colegio, r.sugerencias)
+    return r
+
+
+def resumen_en_texto(e: Entrada, r: Resultado, decision: str = "", justificacion: str = "") -> str:
+    """Genera un resumen descargable. No incluye nombres ni datos personales."""
+    lineas = ["SUGERENCIA DE APOYOS DE COMUNICACIÓN (prototipo académico)", "=" * 60]
+    lineas.append(f"Modalidad declarada: {MODALIDADES.get(e.modalidad, e.modalidad)}")
+    lineas.append(f"Conexión: {CONEXIONES.get(e.conexion, e.conexion)}")
+    lineas.append(f"Tipo de colegio: {TIPOS_COLEGIO.get(r.tipo_colegio, '-')}")
+    lineas.append(f"Responsables sugeridos: {RESPONSABLES_TIPO.get(r.tipo_colegio, '-')}")
+    lineas.append("")
+    lineas.append("APOYOS SUGERIDOS")
+    for i, s in enumerate(r.sugerencias, start=1):
+        lineas.append(f"  {i}. [{s.prioridad}] {s.nombre}")
+        lineas.append(f"     Motivo: {s.motivo}")
+    lineas.append("")
+    lineas.append("NO SUGERIDOS")
+    for nombre, razon in r.no_sugeridos:
+        lineas.append(f"  - {nombre}: {razon}")
+    lineas.append("")
+    lineas.append("ALERTAS")
+    for a in r.alertas:
+        lineas.append(f"  ! {a}")
+    lineas.append("")
+    lineas.append("SALVAGUARDAS")
+    for s in SALVAGUARDAS:
+        lineas.append(f"  * {s}")
+    lineas.append("")
+    lineas.append("DECISIÓN DEL DOCENTE / SAE")
+    lineas.append(f"  Decisión: {decision or '(pendiente)'}")
+    lineas.append(f"  Justificación: {justificacion or '(pendiente)'}")
+    lineas.append("")
+    lineas.append(DECISION_FINAL)
+    return "\n".join(lineas)
+
+  </script>
+
+  <script type="text/plain" id="code-casos">
+"""
+casos_prueba.py — Casos de prueba FICTICIOS para verificar la lógica (Objetivo específico 6).
+
+No usa datos reales de estudiantes ni de colegios. Se ejecuta de dos formas:
+    python casos_prueba.py        -> imprime una tabla de resultados
+    pytest casos_prueba.py        -> cada caso es un test
+"""
+
+from logica import (
+    Entrada, sugerir_apoyos,
+    MOD_LSP, MOD_ORAL, MOD_MIXTA, MOD_NO_DECLARADA,
+    CONEXION_ESTABLE, CONEXION_LIMITADA, CONEXION_NINGUNA,
+    CONT_EN_VIVO, CONT_GRABADO, CONT_AMBOS,
+    PRIORIDAD_PRINCIPAL, PRIORIDAD_COMPLEMENTARIA, PRIORIDAD_PROVISIONAL,
+)
+
+# Cada caso: nombre, entrada, tipo esperado, ids que DEBEN aparecer, ids que NO deben aparecer,
+# y fragmentos de texto que deben aparecer en alguna alerta.
+CASOS = [
+    {
+        "nombre": "C1 · Urbano conectado, estudiante oral, con consentimiento",
+        "entrada": Entrada(MOD_ORAL, CONEXION_ESTABLE, True, True, True, False, True, False, CONT_EN_VIVO),
+        "tipo": "A",
+        "debe": ["SUBTITULOS_NUBE", "ASR_LOCAL"],
+        "no_debe": ["INTERPRETE_LSP", "MATERIAL_VISUAL_IMPRESO"],
+        "alertas": ["consentimiento"],
+        "principal": "SUBTITULOS_NUBE",
+    },
+    {
+        "nombre": "C2 · Conexión estable pero SIN consentimiento: no se sugiere la nube",
+        "entrada": Entrada(MOD_ORAL, CONEXION_ESTABLE, True, True, True, False, False, False, CONT_EN_VIVO),
+        "tipo": "A",
+        "debe": ["ASR_LOCAL"],
+        "no_debe": ["SUBTITULOS_NUBE"],
+        "alertas": [],
+    },
+    {
+        "nombre": "C3 · Conexión inestable: se priorizan materiales preparados",
+        "entrada": Entrada(MOD_ORAL, CONEXION_LIMITADA, True, True, False, False, False, False, CONT_GRABADO),
+        "tipo": "B",
+        "debe": ["VIDEO_SUBTITULADO", "TRANSCRIPCION_REVISADA"],
+        "no_debe": ["SUBTITULOS_NUBE", "ASR_LOCAL"],
+        "alertas": [],
+    },
+    {
+        "nombre": "C4 · Rural sin Internet, con electricidad y equipo apto",
+        "entrada": Entrada(MOD_ORAL, CONEXION_NINGUNA, True, True, True, False, False, False, CONT_EN_VIVO),
+        "tipo": "C",
+        "debe": ["ASR_LOCAL", "TRANSCRIPCION_REVISADA"],
+        "no_debe": ["SUBTITULOS_NUBE"],
+        "alertas": ["Procesamiento local"],
+        "principal": "ASR_LOCAL",
+    },
+    {
+        "nombre": "C5 · Rural sin Internet y equipo NO apto: sin ASR local",
+        "entrada": Entrada(MOD_ORAL, CONEXION_NINGUNA, True, True, False, False, False, False, CONT_EN_VIVO),
+        "tipo": "C",
+        "debe": ["TRANSCRIPCION_REVISADA"],
+        "no_debe": ["ASR_LOCAL", "SUBTITULOS_NUBE"],
+        "alertas": [],
+    },
+    {
+        "nombre": "C6 · Sin electricidad confiable: nada de IA, material impreso y gestión",
+        "entrada": Entrada(MOD_ORAL, CONEXION_NINGUNA, False, True, False, False, False, False, CONT_EN_VIVO),
+        "tipo": "D",
+        "debe": ["MATERIAL_VISUAL_IMPRESO", "GESTION_INFRAESTRUCTURA"],
+        "no_debe": ["ASR_LOCAL", "SUBTITULOS_NUBE", "VIDEO_SUBTITULADO"],
+        "alertas": ["apoyo humano coordinado"],
+    },
+    {
+        "nombre": "C7 · Usa LSP con intérprete: el apoyo humano es el principal",
+        "entrada": Entrada(MOD_LSP, CONEXION_ESTABLE, True, True, True, True, True, False, CONT_EN_VIVO),
+        "tipo": "A",
+        "debe": ["INTERPRETE_LSP", "MODELO_LINGUISTICO", "SUBTITULOS_NUBE"],
+        "no_debe": [],
+        "alertas": ["no equivalen a la interpretación"],
+        "principal": "INTERPRETE_LSP",
+        "complementaria": "SUBTITULOS_NUBE",
+    },
+    {
+        "nombre": "C8 · Usa LSP y NO hay intérprete: alerta de brecha, sin avatar",
+        "entrada": Entrada(MOD_LSP, CONEXION_NINGUNA, True, True, True, False, False, False, CONT_EN_VIVO),
+        "tipo": "C",
+        "debe": ["ASR_LOCAL"],
+        "no_debe": ["INTERPRETE_LSP", "MODELO_LINGUISTICO"],
+        "alertas": ["Brecha de apoyo humano"],
+        "complementaria": "ASR_LOCAL",
+    },
+    {
+        "nombre": "C9 · Modalidad no declarada: todo es provisional",
+        "entrada": Entrada(MOD_NO_DECLARADA, CONEXION_ESTABLE, True, True, True, False, True, False, CONT_EN_VIVO),
+        "tipo": "A",
+        "debe": ["SUBTITULOS_NUBE"],
+        "no_debe": [],
+        "alertas": ["Perfil incompleto"],
+        "provisional": "SUBTITULOS_NUBE",
+    },
+    {
+        "nombre": "C10 · Aula ruidosa con ASR: alerta de micrófono y revisión",
+        "entrada": Entrada(MOD_ORAL, CONEXION_NINGUNA, True, True, True, False, False, True, CONT_EN_VIVO),
+        "tipo": "C",
+        "debe": ["ASR_LOCAL"],
+        "no_debe": [],
+        "alertas": ["Aula ruidosa"],
+    },
+    {
+        "nombre": "C11 · Modalidad mixta: apoyo humano y texto, ambos principales",
+        "entrada": Entrada(MOD_MIXTA, CONEXION_ESTABLE, True, True, True, True, True, False, CONT_AMBOS),
+        "tipo": "A",
+        "debe": ["INTERPRETE_LSP", "SUBTITULOS_NUBE"],
+        "no_debe": [],
+        "alertas": [],
+        "principal": "SUBTITULOS_NUBE",
+    },
+    {
+        "nombre": "C12 · Entrada incoherente: dispositivo apto sin dispositivo",
+        "entrada": Entrada(MOD_ORAL, CONEXION_NINGUNA, True, False, True, False, False, False, CONT_EN_VIVO),
+        "tipo": "",
+        "debe": [],
+        "no_debe": [],
+        "alertas": [],
+        "con_error": True,
+    },
+]
+
+
+def verificar_caso(caso: dict) -> tuple:
+    """Ejecuta un caso y devuelve (aprobado, lista_de_fallas)."""
+    r = sugerir_apoyos(caso["entrada"])
+    fallas = []
+
+    if caso.get("con_error"):
+        if not r.errores:
+            fallas.append("Se esperaba un error de validación y no ocurrió")
+        return (len(fallas) == 0), fallas
+
+    ids = [s.id_apoyo for s in r.sugerencias]
+    if r.tipo_colegio != caso["tipo"]:
+        fallas.append(f"Tipo esperado {caso['tipo']}, obtenido {r.tipo_colegio}")
+    for i in caso["debe"]:
+        if i not in ids:
+            fallas.append(f"Debía sugerir {i}")
+    for i in caso["no_debe"]:
+        if i in ids:
+            fallas.append(f"No debía sugerir {i}")
+    for fragmento in caso["alertas"]:
+        if not any(fragmento in a for a in r.alertas):
+            fallas.append(f"Falta alerta con «{fragmento}»")
+
+    esperadas = [("principal", PRIORIDAD_PRINCIPAL),
+                 ("complementaria", PRIORIDAD_COMPLEMENTARIA),
+                 ("provisional", PRIORIDAD_PROVISIONAL)]
+    for clave, prioridad in esperadas:
+        if clave in caso:
+            encontrada = [s.prioridad for s in r.sugerencias if s.id_apoyo == caso[clave]]
+            if encontrada != [prioridad]:
+                fallas.append(f"{caso[clave]} debía ser «{prioridad}», fue {encontrada}")
+
+    # Invariantes que se cumplen en TODOS los casos válidos
+    if any("avatar" in s.nombre.lower() for s in r.sugerencias):
+        fallas.append("Nunca se debe sugerir un avatar")
+    if not any("avatar" in n.lower() for n, _ in r.no_sugeridos):
+        fallas.append("Los avatares deben figurar como no sugeridos")
+
+    return (len(fallas) == 0), fallas
+
+
+def ejecutar_casos() -> list:
+    """Ejecuta todos los casos y devuelve filas (nombre, aprobado, detalle)."""
+    filas = []
+    for caso in CASOS:
+        ok, fallas = verificar_caso(caso)
+        filas.append((caso["nombre"], ok, "; ".join(fallas) if fallas else "—"))
+    return filas
+
+
+# --- Compatibilidad con pytest ----------------------------------------------------
+def test_todos_los_casos():
+    for nombre, ok, detalle in ejecutar_casos():
+        assert ok, f"{nombre}: {detalle}"
+
+
+if __name__ == "__main__":
+    total_ok = 0
+    for nombre, ok, detalle in ejecutar_casos():
+        print(("OK   " if ok else "FALLA"), nombre, "" if ok else f"-> {detalle}")
+        total_ok += ok
+    print(f"\n{total_ok}/{len(CASOS)} casos aprobados")
+
+  </script>
+
+  <script type="text/plain" id="code-app">
+"""
+app.py — Interfaz Streamlit del prototipo, organizada como un recorrido de pantallas.
+
+Ejecutar con:  streamlit run app.py
+La interfaz solo recoge datos y muestra resultados; toda la lógica está en logica.py.
+
+Recorrido del usuario (docente o especialista del SAE):
+    1 Propuesta -> 2 Diagnóstico del colegio -> 3 Perfil declarado -> 4 Sugerencia -> 5 Decisión
+Pantallas de apoyo: "Viaje del usuario" (mapa del proceso) y "Verificación" (casos de prueba).
+"""
+
+import streamlit as st
+
+from logica import (
+    Entrada, sugerir_apoyos, clasificar_colegio, resumen_en_texto,
+    MODALIDADES, CONEXIONES, CONTENIDOS, TIPOS_COLEGIO, RESPONSABLES_TIPO,
+    SALVAGUARDAS, FASES, DECISION_FINAL,
+    PRIORIDAD_PRINCIPAL, PRIORIDAD_COMPLEMENTARIA,
+    CONEXION_ESTABLE, CONT_EN_VIVO, MOD_NO_DECLARADA,
+    TIPO_A, TIPO_B, TIPO_C, TIPO_D,
+)
+from casos_prueba import ejecutar_casos
+
+st.set_page_config(page_title="Apoyos de comunicación", page_icon="🦻", layout="wide")
+
+# ---------------------------------------------------------------------------
+# CONSTANTES DE INTERFAZ
+# ---------------------------------------------------------------------------
+# Pantallas del recorrido principal (arreglo) y pantallas de apoyo.
+RECORRIDO = ["Propuesta", "Diagnóstico", "Perfil", "Sugerencia", "Decisión"]
+APOYO = ["Viaje del usuario", "Verificación"]
+PANTALLAS = RECORRIDO + APOYO
+
+OPCIONES_DECISION = [
+    "Pendiente",
+    "Se adopta la sugerencia",
+    "Se adopta con modificaciones",
+    "Se descarta la sugerencia",
+]
+
+# Color por tipo de colegio (progresión de menor a mayor restricción)
+COLOR_TIPO = {TIPO_A: "#0f766e", TIPO_B: "#3b82a0", TIPO_C: "#b7791f", TIPO_D: "#b4413c"}
+BREVE_TIPO = {
+    TIPO_A: "Internet estable, electricidad y equipos",
+    TIPO_B: "Hay Internet, pero se cae o es lento",
+    TIPO_C: "Sin Internet, con electricidad y equipo",
+    TIPO_D: "Sin electricidad confiable o sin equipo",
+}
+COLOR_PRIORIDAD = {PRIORIDAD_PRINCIPAL: "#0f766e", PRIORIDAD_COMPLEMENTARIA: "#3b82a0"}
+
+# Cifras del análisis (informe: MINEDU, 2026; MINEDU, 2021b)
+CIFRAS = [
+    ("27,3 %", "de los locales públicos tiene Internet"),
+    ("18,9 %", "en el área rural"),
+    ("10 %", "de los locales no tiene electricidad"),
+    ("57", "intérpretes de LSP en 2021, para todo el sector"),
+]
+
+# Mapa del viaje del usuario: fase (Tabla 5) -> qué hace el usuario, pantalla, alcance del sistema
+VIAJE = [
+    ("Diagnóstico de necesidades", "Dirección, docentes y SAE",
+     "Describen las condiciones del colegio y la forma de comunicación que declara el estudiante.",
+     "Pantallas 2 y 3", "Sí: recoge los datos"),
+    ("Selección de herramientas", "Equipo técnico, SAE y UGEL",
+     "Revisan los apoyos sugeridos, sus requisitos y sus alertas.",
+     "Pantalla 4", "Sí: sugiere y explica"),
+    ("Pruebas de funcionamiento", "Desarrolladores, docentes y SAE",
+     "Prueban la herramienta en el aula real: precisión, ruido, tiempo de respuesta.",
+     "Fuera del sistema", "No: lo hacen las personas"),
+    ("Implementación progresiva", "Dirección, SAE y UGEL",
+     "Deciden, capacitan a los docentes y establecen la supervisión humana.",
+     "Pantalla 5", "Parcial: registra la decisión"),
+    ("Seguimiento y mejora", "Docentes, SAE, estudiantes",
+     "Recogen observaciones, revisan incidencias y ajustan el apoyo.",
+     "Fuera del sistema", "No: lo hacen las personas"),
+]
+
+CSS = """
+<style>
+.block-container {max-width: 1080px; padding-top: 4rem;}
+h1, h2, h3 {letter-spacing: -0.01em;}
+.stepper {display:flex; gap:6px; margin: 0 0 1.4rem 0; flex-wrap:wrap;}
+.step {flex:1; min-width:120px; padding:8px 10px; border-radius:8px; background:#f1f5f4;
+       color:#5b6b7a; font-size:0.85rem; border-bottom:3px solid #d6dfdd;}
+.step b {display:block; font-size:0.72rem; letter-spacing:.06em; text-transform:uppercase;}
+.step.on {background:#e2f1ee; color:#0b4f49; border-bottom-color:#0f766e;}
+.step.done {color:#0b4f49; border-bottom-color:#7fb8b1;}
+.hero {padding: 1.6rem 1.8rem; border-radius:14px; background:#0f3d3a; color:#f3faf9; margin-bottom:1.2rem;}
+.hero h1 {color:#ffffff; margin:0 0 .4rem 0; font-size:2rem;}
+.hero p {margin:0; font-size:1.05rem; color:#cfe6e3;}
+.cifra {padding:12px 14px; border-radius:10px; background:#f1f5f4; min-height:118px;}
+.cifra b {font-size:1.7rem; color:#0f766e; display:block; line-height:1.1;}
+.cifra span {font-size:.85rem; color:#44556a;}
+.tipo {padding:14px 16px; border-radius:10px; background:#fff; border:1px solid #dfe6e4;
+       border-top:5px solid var(--c); min-height:96px;}
+.tipo.sel {background:#f6fbfa; box-shadow:0 0 0 2px var(--c);}
+.tipo b {font-size:1.05rem; color:var(--c);}
+.tipo p {margin:.3rem 0 0 0; font-size:.88rem; color:#44556a;}
+.apoyo {padding:14px 16px; border-radius:10px; background:#fff; border:1px solid #dfe6e4;
+        border-left:6px solid var(--c); margin-bottom:10px;}
+.apoyo .tag {font-size:.72rem; text-transform:uppercase; letter-spacing:.06em; color:var(--c); font-weight:700;}
+.apoyo h4 {margin:.1rem 0 .3rem 0; font-size:1.02rem;}
+.apoyo p {margin:.15rem 0; font-size:.9rem; color:#33445a;}
+.aviso {padding:10px 14px; border-radius:8px; background:#fff7e6; border:1px solid #f0d9a4;
+        font-size:.9rem; margin-bottom:8px;}
+.decide {padding:12px 16px; border-radius:10px; background:#eef4ff; border:1px solid #c9d8f5;
+         color:#1f3a6b; font-size:.95rem; margin-bottom:1rem;}
+.fila {display:grid; grid-template-columns: 1.1fr 1.2fr 2fr .9fr 1.1fr; gap:10px; padding:10px 12px;
+       border-bottom:1px solid #e3e9e7; font-size:.86rem; align-items:start;}
+.fila.cab {font-weight:700; color:#0b4f49; background:#f1f5f4; border-radius:8px 8px 0 0;
+           font-size:.75rem; text-transform:uppercase; letter-spacing:.05em;}
+.si {color:#0f766e; font-weight:600;} .no {color:#b4413c; font-weight:600;} .par {color:#b7791f; font-weight:600;}
+</style>
+"""
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+# ---------------------------------------------------------------------------
+# ESTADO: valores del formulario que persisten entre pantallas
+# ---------------------------------------------------------------------------
+def iniciar_estado():
+    if "pantalla" not in st.session_state:
+        st.session_state["pantalla"] = PANTALLAS[0]
+    if "datos" not in st.session_state:
+        st.session_state["datos"] = {
+            "modalidad": MOD_NO_DECLARADA, "conexion": CONEXION_ESTABLE,
+            "electricidad": True, "dispositivo": True, "apto": False,
+            "humano": False, "consentimiento": False, "ruidosa": False,
+            "contenido": CONT_EN_VIVO,
+        }
+
+
+def ir_a(nombre: str):
+    """Callback de navegación."""
+    st.session_state["pantalla"] = nombre
+
+
+def construir_entrada() -> Entrada:
+    d = st.session_state["datos"]
+    return Entrada(
+        modalidad=d["modalidad"], conexion=d["conexion"],
+        electricidad_confiable=d["electricidad"], hay_dispositivo=d["dispositivo"],
+        dispositivo_apto_local=d["apto"], apoyo_humano_lsp_disponible=d["humano"],
+        consentimiento_familia=d["consentimiento"], aula_ruidosa=d["ruidosa"],
+        contenido=d["contenido"],
+    )
+
+
+def selector(etiqueta, clave, opciones: dict, ayuda=None):
+    """Selectbox que lee y escribe en st.session_state['datos']."""
+    llaves = list(opciones.keys())
+    actual = st.session_state["datos"][clave]
+    elegido = st.selectbox(etiqueta, llaves, index=llaves.index(actual),
+                           format_func=lambda k: opciones[k], help=ayuda, key=f"w_{clave}")
+    st.session_state["datos"][clave] = elegido
+
+
+def casilla(etiqueta, clave, ayuda=None):
+    """Checkbox que lee y escribe en st.session_state['datos']."""
+    valor = st.checkbox(etiqueta, value=st.session_state["datos"][clave], help=ayuda, key=f"w_{clave}")
+    st.session_state["datos"][clave] = valor
+
+
+def barra_pasos():
+    """Dibuja el indicador de pasos del recorrido principal."""
+    actual = st.session_state["pantalla"]
+    idx = RECORRIDO.index(actual) if actual in RECORRIDO else -1
+    piezas = []
+    for i, nombre in enumerate(RECORRIDO):
+        clase = "on" if i == idx else ("done" if 0 <= idx and i < idx else "")
+        piezas.append(f'<div class="step {clase}"><b>Paso {i + 1}</b>{nombre}</div>')
+    st.markdown(f'<div class="stepper">{"".join(piezas)}</div>', unsafe_allow_html=True)
+
+
+def navegacion(anterior=None, siguiente=None, texto_sig="Continuar"):
+    col_a, _, col_b = st.columns([1, 3, 1])
+    if anterior:
+        col_a.button("← Volver", on_click=ir_a, args=(anterior,), key=f"ant_{anterior}")
+    if siguiente:
+        col_b.button(f"{texto_sig} →", on_click=ir_a, args=(siguiente,), type="primary", key=f"sig_{siguiente}")
+
+
+def tarjeta_tipo(tipo: str, seleccionado=False) -> str:
+    clase = "tipo sel" if seleccionado else "tipo"
+    return (f'<div class="{clase}" style="--c:{COLOR_TIPO[tipo]}"><b>Tipo {tipo}</b>'
+            f'<p>{BREVE_TIPO[tipo]}</p></div>')
+
+
+# ---------------------------------------------------------------------------
+# PANTALLAS
+# ---------------------------------------------------------------------------
+def pantalla_propuesta():
+    st.markdown(
+        '<div class="hero"><h1>Apoyos de comunicación para estudiantes con discapacidad auditiva</h1>'
+        '<p>Un prototipo que ayuda al docente y al especialista del SAE a considerar qué apoyo digital '
+        'o humano es viable en su colegio público. Sugiere; no decide.</p></div>',
+        unsafe_allow_html=True)
+
+    st.markdown("#### El problema: una misma solución no sirve para todos los colegios")
+    cols = st.columns(len(CIFRAS))
+    for col, (cifra, texto) in zip(cols, CIFRAS):
+        col.markdown(f'<div class="cifra"><b>{cifra}</b><span>{texto}</span></div>', unsafe_allow_html=True)
+    st.caption("Fuentes: Censo Educativo 2025 (MINEDU, 2026); MINEDU (2021b). Datos de conectividad autodeclarados.")
+
+    st.markdown("#### La propuesta: cuatro tipos de colegio, cuatro caminos")
+    cols = st.columns(4)
+    for col, tipo in zip(cols, TIPOS_COLEGIO):
+        col.markdown(tarjeta_tipo(tipo), unsafe_allow_html=True)
+    st.caption("Clasificación propuesta por el equipo; no es una clasificación oficial del MINEDU.")
+
+    st.markdown(f'<div class="decide"><b>Quién decide:</b> {DECISION_FINAL}</div>', unsafe_allow_html=True)
+    st.write("**El prototipo no pide nombres ni datos personales, no graba audio y no diagnostica.**")
+    navegacion(siguiente="Diagnóstico", texto_sig="Comenzar el recorrido")
+
+
+def pantalla_diagnostico():
+    st.header("Diagnóstico del colegio")
+    st.write("Indique las condiciones actuales del local. No se necesita identificar el colegio.")
+    col1, col2 = st.columns(2)
+    with col1:
+        selector("Conectividad del local", "conexion", CONEXIONES)
+        casilla("Hay electricidad confiable en el local", "electricidad")
+        casilla("Hay un dispositivo disponible (del docente o del colegio)", "dispositivo")
+    with col2:
+        casilla("El dispositivo puede procesar voz localmente (equipo compatible)", "apto",
+                "Si no está seguro, déjelo sin marcar: es la opción prudente.")
+        casilla("El aula suele ser ruidosa", "ruidosa")
+        selector("Contenido que se necesita hacer accesible", "contenido", CONTENIDOS)
+
+    entrada = construir_entrada()
+    tipo = clasificar_colegio(entrada)
+    st.markdown("##### Clasificación resultante")
+    cols = st.columns(4)
+    for col, t in zip(cols, TIPOS_COLEGIO):
+        col.markdown(tarjeta_tipo(t, seleccionado=(t == tipo)), unsafe_allow_html=True)
+    st.write(f"**{TIPOS_COLEGIO[tipo]}.** Responsables sugeridos: {RESPONSABLES_TIPO[tipo]}.")
+    navegacion("Propuesta", "Perfil")
+
+
+def pantalla_perfil():
+    st.header("Perfil comunicativo declarado")
+    st.markdown('<div class="aviso">La forma de comunicación la declara el estudiante y su familia. '
+                'El sistema no la infiere ni la evalúa.</div>', unsafe_allow_html=True)
+    selector("¿Cómo se comunica el estudiante, según lo declarado por él y su familia?",
+             "modalidad", MODALIDADES)
+    col1, col2 = st.columns(2)
+    with col1:
+        casilla("Hay intérprete de LSP o modelo lingüístico disponible (vía UGEL)", "humano")
+    with col2:
+        casilla("La familia dio consentimiento escrito para usar herramientas en la nube", "consentimiento",
+                "Obligatorio para herramientas que envían la voz a servidores externos.")
+    if st.session_state["datos"]["modalidad"] == MOD_NO_DECLARADA:
+        st.warning("Si aún no se consultó al estudiante y su familia, las sugerencias saldrán como provisionales.")
+    navegacion("Diagnóstico", "Sugerencia", "Ver sugerencia")
+
+
+def tarjeta_apoyo(s) -> str:
+    color = COLOR_PRIORIDAD.get(s.prioridad, "#b7791f")
+    etiqueta = s.prioridad.split(" (")[0]
+    return (f'<div class="apoyo" style="--c:{color}"><span class="tag">{etiqueta}</span>'
+            f'<h4>{s.nombre}</h4><p><b>Por qué:</b> {s.motivo}</p>'
+            f'<p><b>Tenga en cuenta:</b> {s.nota}</p></div>')
+
+
+def pantalla_sugerencia():
+    entrada = construir_entrada()
+    r = sugerir_apoyos(entrada)
+    st.session_state["resultado"] = r
+    st.header("Sugerencia de apoyos")
+    if r.errores:
+        for err in r.errores:
+            st.error(err)
+        navegacion("Perfil", None)
+        return
+
+    st.markdown(f'<div class="decide"><b>Recuerde:</b> {DECISION_FINAL}</div>', unsafe_allow_html=True)
+    cols = st.columns(4)
+    for col, t in zip(cols, TIPOS_COLEGIO):
+        col.markdown(tarjeta_tipo(t, seleccionado=(t == r.tipo_colegio)), unsafe_allow_html=True)
+
+    if r.alertas:
+        st.markdown("##### Alertas antes de decidir")
+        for a in r.alertas:
+            st.markdown(f'<div class="aviso">⚠️ {a}</div>', unsafe_allow_html=True)
+
+    st.markdown("##### Apoyos sugeridos")
+    if not r.sugerencias:
+        st.write("No hay apoyos viables con las condiciones indicadas.")
+    for s in r.sugerencias:
+        st.markdown(tarjeta_apoyo(s), unsafe_allow_html=True)
+
+    with st.expander(f"No sugeridos ({len(r.no_sugeridos)})"):
+        for nombre, razon in r.no_sugeridos:
+            st.write(f"- **{nombre}:** {razon}")
+    with st.expander("Salvaguardas obligatorias"):
+        for s in SALVAGUARDAS:
+            st.write(f"- {s}")
+    with st.expander("Cómo se llegó a esta sugerencia (trazabilidad)"):
+        for regla in r.reglas_aplicadas:
+            st.write(f"- {regla}")
+    navegacion("Perfil", "Decisión", "Registrar decisión")
+
+
+def pantalla_decision():
+    st.header("Decisión del docente y del SAE")
+    st.markdown('<div class="decide">El sistema no decide. Aquí se registra lo que resuelvan el docente y el '
+                'especialista del SAE, con el estudiante y su familia.</div>', unsafe_allow_html=True)
+    entrada = construir_entrada()
+    r = sugerir_apoyos(entrada)
+    if r.errores:
+        st.error("Revise los datos de las pantallas anteriores.")
+        navegacion("Sugerencia", None)
+        return
+    decision = st.radio("Decisión", OPCIONES_DECISION, horizontal=True)
+    justificacion = st.text_area("Justificación (sin nombres ni datos personales)")
+    st.download_button(
+        "Descargar resumen (.txt)",
+        data=resumen_en_texto(entrada, r, decision if decision != "Pendiente" else "", justificacion),
+        file_name="resumen_sugerencia.txt", mime="text/plain", type="primary")
+    st.markdown("##### Después de decidir")
+    st.write("El sistema termina aquí. Las **pruebas en el aula** y el **seguimiento** (fases 3 y 5 de la "
+             "propuesta) las realizan las personas: probar la herramienta, capacitar a los docentes y "
+             "recoger las observaciones del estudiante.")
+    navegacion("Sugerencia", "Viaje del usuario", "Ver el viaje")
+
+
+def pantalla_viaje():
+    st.header("Viaje del usuario")
+    st.write("Recorrido de un docente o especialista del SAE a lo largo de las cinco fases de implementación "
+             "propuestas, y qué parte cubre el prototipo.")
+    cabecera = ("Fase", "Quién participa", "Qué hace", "Dónde", "¿Lo cubre el sistema?")
+    filas = ['<div class="fila cab">' + "".join(f"<div>{c}</div>" for c in cabecera) + "</div>"]
+    for i, (fase, quien, que, donde, alcance) in enumerate(VIAJE, start=1):
+        clase = "si" if alcance.startswith("Sí") else ("par" if alcance.startswith("Parcial") else "no")
+        filas.append(f'<div class="fila"><div><b>{i}. {fase}</b></div><div>{quien}</div><div>{que}</div>'
+                     f'<div>{donde}</div><div class="{clase}">{alcance}</div></div>')
+    st.markdown("".join(filas), unsafe_allow_html=True)
+    st.caption("Fases tomadas de la Tabla 5 del informe. Las fases 3 y 5 requieren personas: el sistema no las sustituye.")
+    st.button("Volver a la propuesta", on_click=ir_a, args=("Propuesta",))
+
+
+def pantalla_verificacion():
+    st.header("Verificación con casos de prueba")
+    st.write("Doce casos ficticios contrastan la lógica con el resultado esperado. No usan datos reales.")
+    filas = ejecutar_casos()
+    aprobados = sum(1 for _, ok, _ in filas if ok)
+    st.metric("Casos aprobados", f"{aprobados} / {len(filas)}")
+    st.dataframe(
+        [{"Caso": n, "Resultado": "✅ Aprobado" if ok else "❌ Falla", "Detalle": d} for n, ok, d in filas],
+        width="stretch", hide_index=True)
+
+
+PANTALLA_FUNCION = {
+    "Propuesta": pantalla_propuesta, "Diagnóstico": pantalla_diagnostico, "Perfil": pantalla_perfil,
+    "Sugerencia": pantalla_sugerencia, "Decisión": pantalla_decision,
+    "Viaje del usuario": pantalla_viaje, "Verificación": pantalla_verificacion,
+}
+
+# ---------------------------------------------------------------------------
+# PROGRAMA PRINCIPAL
+# ---------------------------------------------------------------------------
+iniciar_estado()
+
+with st.sidebar:
+    st.markdown("### 🦻 Apoyos de comunicación")
+    st.caption("Prototipo académico · Computación en la Sociedad")
+    st.radio("Pantalla", PANTALLAS, key="pantalla")
+    st.divider()
+    st.caption("Sugiere, no decide. Sin datos personales.")
+
+barra_pasos()
+PANTALLA_FUNCION[st.session_state["pantalla"]]()
+
+  </script>
+
+  <script type="module">
+    import { mount } from "https://cdn.jsdelivr.net/npm/@stlite/browser/build/stlite.js";
+
+    mount(
+      {
+        entrypoint: "app.py",
+        files: {
+          "app.py": document.getElementById("code-app").textContent.trim(),
+          "logica.py": document.getElementById("code-logica").textContent.trim(),
+          "casos_prueba.py": document.getElementById("code-casos").textContent.trim(),
+        },
+        streamlitConfig: {
+          "theme.primaryColor": "#0f766e",
+          "theme.backgroundColor": "#ffffff",
+          "theme.secondaryBackgroundColor": "#f1f5f4",
+          "theme.textColor": "#1f2a44",
+        },
+      },
+      document.getElementById("root")
+    );
+  </script>
+</body>
+</html>

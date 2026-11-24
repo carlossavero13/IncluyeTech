@@ -32,11 +32,22 @@ python casos_prueba.py
 
 ---
 
+## 🌐 Despliegue en Vercel (WebAssembly / stlite)
+
+Este proyecto está configurado para desplegarse de manera 100% estática en **Vercel** usando **[stlite](https://github.com/whitphx/stlite)**:
+- Ejecuta Streamlit y la lógica de Python directamente en el navegador del usuario a través de WebAssembly (Pyodide).
+- No requiere servidores persistentes ni funciones serverless.
+- Basta con conectar el repositorio a **Vercel** y se desplegará de forma automática e inmediata a través de `index.html`.
+
+---
+
 ## 📁 Estructura del Proyecto
 
+- `index.html`: Entrypoint estático para despliegue en Vercel con `stlite` (WebAssembly).
+- `vercel.json` y `.vercelignore`: Configuración para despliegue estático en Vercel.
 - `app.py`: Interfaz interactiva Streamlit (recorrido de pantallas: Propuesta $\rightarrow$ Diagnóstico $\rightarrow$ Perfil $\rightarrow$ Sugerencia $\rightarrow$ Decisión, más mapa del viaje del usuario y verificación).
 - `logica.py`: Constantes, arreglos, funciones y reglas de decisión (sin dependencias de Streamlit).
 - `casos_prueba.py`: 12 casos de prueba ficticios y verificación automática.
 - `.streamlit/config.toml`: Configuración del tema visual de la interfaz.
-- `requirements.txt`: Dependencias del proyecto (`streamlit`).
+- `requirements.txt`: Dependencias del proyecto (`streamlit`) para ejecución local o en Streamlit Community Cloud.
 - `LEEME.txt`: Resumen de especificaciones del proyecto.

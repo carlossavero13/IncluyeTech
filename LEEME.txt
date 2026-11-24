@@ -1,0 +1,18 @@
+Prototipo: Sugerencia de apoyos de comunicación (discapacidad auditiva, colegios públicos de EBR)
+Curso: Computación en la Sociedad
+
+Requisitos: Python 3.10 o superior.
+
+Ejecución:
+  1. pip install -r requirements.txt
+  2. streamlit run app.py          (abre la interfaz en el navegador)
+  3. python casos_prueba.py        (ejecuta los 12 casos de prueba ficticios)
+
+Archivos:
+  logica.py        Constantes, arreglos, funciones y reglas de decisión (sin Streamlit).
+  app.py           Interfaz Streamlit: recorrido de cinco pantallas, viaje del usuario y verificación.
+  casos_prueba.py  Casos de prueba ficticios y verificación automática.
+  .streamlit/      Tema visual de la interfaz.
+
+El sistema SUGIERE; la decisión final corresponde al docente y al especialista del SAE.
+No diagnostica, no evalúa el rendimiento, no graba audio ni guarda datos personales.

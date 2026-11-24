@@ -20,7 +20,7 @@ pip install -r requirements.txt
 
 ### Ejecución de la aplicación
 ```bash
-streamlit run app.py
+streamlit run streamlit_app.py
 ```
 Abre la interfaz en el navegador (por defecto en `http://localhost:8501`).
 
@@ -45,7 +45,7 @@ Este proyecto está configurado para desplegarse de manera 100% estática en **V
 
 - `index.html`: Entrypoint estático para despliegue en Vercel con `stlite` (WebAssembly).
 - `vercel.json` y `.vercelignore`: Configuración para despliegue estático en Vercel.
-- `app.py`: Interfaz interactiva Streamlit (recorrido de pantallas: Propuesta $\rightarrow$ Diagnóstico $\rightarrow$ Perfil $\rightarrow$ Sugerencia $\rightarrow$ Decisión, más mapa del viaje del usuario y verificación).
+- `streamlit_app.py`: Interfaz interactiva Streamlit (recorrido de pantallas: Propuesta $\rightarrow$ Diagnóstico $\rightarrow$ Perfil $\rightarrow$ Sugerencia $\rightarrow$ Decisión, más mapa del viaje del usuario y verificación).
 - `logica.py`: Constantes, arreglos, funciones y reglas de decisión (sin dependencias de Streamlit).
 - `casos_prueba.py`: 12 casos de prueba ficticios y verificación automática.
 - `.streamlit/config.toml`: Configuración del tema visual de la interfaz.

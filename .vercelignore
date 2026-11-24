@@ -1,6 +1,6 @@
 # Evitar que Vercel intente ejecutar el proyecto como Python Serverless Function
 # La aplicacion corre como sitio estatico con stlite (WebAssembly) en index.html
-app.py
+streamlit_app.py
 logica.py
 casos_prueba.py
 requirements.txt

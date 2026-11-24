@@ -1090,9 +1090,9 @@ PANTALLA_FUNCION[st.session_state["pantalla"]]()
 
     mount(
       {
-        entrypoint: "app.py",
+        entrypoint: "streamlit_app.py",
         files: {
-          "app.py": document.getElementById("code-app").textContent.trim(),
+          "streamlit_app.py": document.getElementById("code-app").textContent.trim(),
           "logica.py": document.getElementById("code-logica").textContent.trim(),
           "casos_prueba.py": document.getElementById("code-casos").textContent.trim(),
         },
